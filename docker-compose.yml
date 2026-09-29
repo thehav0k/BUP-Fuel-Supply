@@ -49,7 +49,7 @@ services:
 
   frontend:
     build: {context: ./frontend}
-    ports: ["3000:3000"]
+    ports: ["${FRONTEND_PORT:-3000}:3000"]
     depends_on:
       backend: {condition: service_healthy}
     healthcheck:

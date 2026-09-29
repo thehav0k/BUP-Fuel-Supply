@@ -32,12 +32,13 @@ ensure_env() {
 up() {
   ensure_docker
   ensure_env
+  set -a; . ./.env; set +a
   echo "Building and starting services (first run downloads images; later runs are cached)..."
   compose up -d --build --wait --wait-timeout 600
   compose ps --format 'table {{.Service}}\t{{.Status}}'
   cat <<EOF
 
-  Dashboard    http://localhost:3000
+  Dashboard    http://localhost:${FRONTEND_PORT:-3000}
   Backend API  http://localhost:8001/docs
   Grafana      http://localhost:3001  (admin/admin, dashboard "Fuel Supply Operations")
   Prometheus   http://localhost:9090
