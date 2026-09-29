@@ -128,7 +128,7 @@ On first run, `run.sh` creates `.env` from `.env.example`. The simulator starts 
 | Observability | Prometheus, Grafana, JSON logs |
 | Delivery | Docker Compose, GitHub Actions |
 
-**Principles**
+### Principles
 
 - **A single point of contact with the simulator.** Only the backend calls it, so retries, caching and fault
   handling live in one place.
