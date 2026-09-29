@@ -37,7 +37,7 @@ export function NetworkScreen({ selectedStation }: { selectedStation: string | n
         ))}
       </section>
 
-      <section aria-label="Depots and map" className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+      <section aria-label="Depots and map" className="grid items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">
         {s.depots.map((d) => (
           <DepotCard key={d.id} depot={d} world={world} />
         ))}

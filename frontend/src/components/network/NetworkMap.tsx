@@ -17,9 +17,9 @@ interface Box {
   h: number
 }
 
-const REGION_BOX: Record<string, Box> = {
+const REGION_BOX: Record<string, Box & { labelBottom?: boolean }> = {
   dhaka: { x: 10, y: 10, w: 250, h: 205 },
-  chattogram: { x: 262, y: 115, w: 248, h: 205 },
+  chattogram: { x: 262, y: 115, w: 248, h: 205, labelBottom: true },
 }
 
 const KNOWN_POS: Record<string, [number, number]> = {
@@ -106,7 +106,7 @@ export function NetworkMap({
             return (
               <g key={rid}>
                 <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={18} fill="var(--muted)" stroke="var(--border)" />
-                <text x={box.x + 14} y={box.y + 22} fontSize={12} fontWeight={600} fill="var(--muted-foreground)">
+                <text x={box.x + 14} y={box.labelBottom ? box.y + box.h - 12 : box.y + 22} fontSize={12} fontWeight={600} fill="var(--muted-foreground)">
                   {world.regionName(rid)}
                 </text>
               </g>
