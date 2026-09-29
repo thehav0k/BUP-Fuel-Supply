@@ -1,0 +1,12 @@
+pyproject.toml
+fuelcore/__init__.py
+fuelcore/analyze.py
+fuelcore/forecast.py
+fuelcore/projection.py
+fuelcore/world.py
+fuelcore.egg-info/PKG-INFO
+fuelcore.egg-info/SOURCES.txt
+fuelcore.egg-info/dependency_links.txt
+fuelcore.egg-info/requires.txt
+fuelcore.egg-info/top_level.txt
+tests/test_fuelcore.py

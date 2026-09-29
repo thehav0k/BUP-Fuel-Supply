@@ -1,0 +1,26 @@
+[project]
+name = "bupfuel-prediction"
+version = "1.0.0"
+description = "Stateless forecast and stockout-risk service"
+requires-python = ">=3.12"
+# Also needs the local shared package: pip install ./shared (distribution "bupfuel-core", import "fuelcore").
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.7",
+  "prometheus-client>=0.20",
+  "prometheus-fastapi-instrumentator>=7.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

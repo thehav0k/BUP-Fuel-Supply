@@ -1,0 +1,135 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens (shadcn-style). Light is the default; dark follows the OS via
+ * prefers-color-scheme, which is also what Tailwind's `dark:` variant uses by default.
+ * Chart/status hues come from a CVD-validated palette (see src/lib/tone.ts).
+ */
+:root {
+  color-scheme: light;
+  --background: #f6f6f4;
+  --foreground: #0b0b0b;
+  --card: #fcfcfb;
+  --card-foreground: #0b0b0b;
+  --popover: #ffffff;
+  --muted: #efeeea;
+  --muted-foreground: #62615d;
+  --accent: #e9e8e3;
+  --accent-foreground: #0b0b0b;
+  --border: #e1e0d9;
+  --input: #d6d5ce;
+  --ring: #2a78d6;
+  --primary: #1f5fae;
+  --primary-foreground: #ffffff;
+  --destructive: #c53030;
+  --destructive-foreground: #ffffff;
+
+  /* status (fixed meaning: good / warning / serious / critical) */
+  --ok: #0ca30c;
+  --warn: #fab219;
+  --serious: #ec835a;
+  --crit: #d03b3b;
+  --ok-ink: #0a6b0a;
+  --warn-ink: #8a5a00;
+  --crit-ink: #b42323;
+  --info-ink: #1f5fae;
+
+  /* chart chrome + categorical series */
+  --chart-grid: #e1e0d9;
+  --chart-axis: #898781;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-muted: #a3a29c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: #0d0d0d;
+    --foreground: #f4f4f2;
+    --card: #1a1a19;
+    --card-foreground: #f4f4f2;
+    --popover: #222221;
+    --muted: #242423;
+    --muted-foreground: #a9a8a0;
+    --accent: #2a2a28;
+    --accent-foreground: #f4f4f2;
+    --border: #2f2f2d;
+    --input: #3a3a37;
+    --ring: #3987e5;
+    --primary: #3987e5;
+    --primary-foreground: #ffffff;
+    --destructive: #e05252;
+    --destructive-foreground: #ffffff;
+
+    --ok-ink: #3fcf3f;
+    --warn-ink: #fab219;
+    --crit-ink: #f07070;
+    --info-ink: #6da7ec;
+
+    --chart-grid: #2c2c2a;
+    --chart-axis: #898781;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-muted: #6b6a65;
+  }
+}
+
+@theme inline {
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-serious: var(--serious);
+  --color-crit: var(--crit);
+  --color-ok-ink: var(--ok-ink);
+  --color-warn-ink: var(--warn-ink);
+  --color-crit-ink: var(--crit-ink);
+  --color-info-ink: var(--info-ink);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html,
+  body {
+    background: var(--background);
+    color: var(--foreground);
+  }
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}

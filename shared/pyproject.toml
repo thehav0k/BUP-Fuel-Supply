@@ -1,0 +1,19 @@
+[project]
+name = "bupfuel-core"
+version = "1.0.0"
+description = "Shared forecast, projection and risk math for the fuel supply platform"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["fuelcore"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

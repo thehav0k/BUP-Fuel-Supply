@@ -1,0 +1,10 @@
+line-length = 120
+target-version = "py312"
+extend-exclude = ["frontend", ".venv"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "RUF"]
+ignore = ["RUF012", "B008"]
+
+[lint.isort]
+known-first-party = ["app", "fuelcore"]
