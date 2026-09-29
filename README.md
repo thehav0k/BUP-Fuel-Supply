@@ -17,12 +17,13 @@ after 192 ticks (2 days) with 115,061 L unmet. **Our platform ends at 100%**, wi
 3. [The big picture](#3-the-big-picture)
 4. [The life of one tick (worked example)](#4-the-life-of-one-tick-worked-example)
 5. [Each part in detail](#5-each-part-in-detail)
-6. [What happens when things break](#6-what-happens-when-things-break)
-7. [Things we discovered about the simulator](#7-things-we-discovered-about-the-simulator)
-8. [Demo script](#8-demo-script)
-9. [Questions judges may ask](#9-questions-judges-may-ask)
-10. [Where the code lives](#10-where-the-code-lives)
-11. [Tests and results](#11-tests-and-results)
+6. [How each part is built: algorithms and techniques](#6-how-each-part-is-built-algorithms-and-techniques)
+7. [What happens when things break](#7-what-happens-when-things-break)
+8. [Things we discovered about the simulator](#8-things-we-discovered-about-the-simulator)
+9. [Demo script](#9-demo-script)
+10. [Questions judges may ask](#10-questions-judges-may-ask)
+11. [Where the code lives](#11-where-the-code-lives)
+12. [Tests and results](#12-tests-and-results)
 
 ---
 
@@ -272,7 +273,7 @@ left.
 
 | Tab | What it shows |
 |---|---|
-| **Network** | Tick, clock, service level; 4 station cards (a bar per fuel, hours to stockout, risk colour, spike badge); depots with the next delivery; routes; a map; click a station to see a forecast-vs-actual chart |
+| **Network** | Tick, clock, service level; 4 station cards (a bar per fuel, hours to stockout, risk colour, spike badge); depots with the next delivery; routes; a real map of Bangladesh with every depot, station and route at its actual location; click a station to see a forecast-vs-actual chart |
 | **Recommendations** | One card per recommendation: reason, quantity, route, risk before → after, confidence, alternative, what-if chart, Approve and Reject |
 | **History & events** | Decision log with live shipment status, the shipments list (cancel PENDING ones), and crisis events |
 | **System health** | Simulator (with breaker state), database, prediction, live stream, decision engine; link to Grafana |
@@ -290,7 +291,70 @@ Banners for **Degraded**, **Stale data** and **Fallback forecast** stay at the t
 
 ---
 
-## 6. What happens when things break
+## 6. How each part is built: algorithms and techniques
+
+Every part uses a simple, well-known technique, chosen because it can be explained in one sentence and checked by
+hand.
+
+### Reading the world
+
+| Part | Algorithm / technique | How it works here | Code |
+|---|---|---|---|
+| Sync loop | **Polling + event-triggered refresh** | Fetch everything every 2 s; an SSE event wakes the loop early. Nothing depends on SSE | `backend/app/runtime.py` |
+| Fetching | **Concurrent fan-out** (`asyncio.gather`) | All 9 resources are requested at the same time, so one sync costs one round trip | `runtime.py` |
+| Consistency | **All-or-nothing snapshot swap ("last known good")** | A new snapshot replaces the old one only if every resource arrived; otherwise the old one stays and the screen shows Degraded. The engine never plans on half-updated data | `runtime.py`, `state.py` |
+| Transient errors | **Retry with exponential backoff and jitter** (tenacity) | Up to 3 attempts per GET, waiting roughly 0.2 s, 0.4 s... with randomness so retries don't bunch up; only 503s, timeouts and dropped connections are retried. A second pass retries just the resources that failed | `backend/app/sim/client.py` |
+| Outages | **Circuit breaker** (state machine: closed → open → half-open) | After 5 failures in a row, stop calling for 10 s, then let one trial call through; success closes it, failure re-opens it | `backend/app/sim/breaker.py` |
+| Live stream | **SSE consumer with exponential-backoff reconnect** | Reconnect waits grow 1 s, 2 s, 4 s... up to 30 s; every reconnect triggers a full re-fetch because the stream has no replay | `backend/app/sim/sse.py` |
+| Error shapes | **Normalisation into typed exceptions** | `{"error":{}}`, `{"detail":{}}` and `{"detail":[...]}` all become one of: unavailable, conflict (409), not found, validation | `backend/app/sim/errors.py` |
+| Reset detection | **Monotonic-counter invariant** | Ticks must never go backwards, and allocation ids never shrink; if either happens, or the stream announces a reset, the simulator was reset | `runtime.py` |
+
+### Forecasting and risk
+
+| Part | Algorithm / technique | How it works here | Code |
+|---|---|---|---|
+| Demand forecast | **Multiplicative baseline model with daily seasonality** | liters per tick = daily profile ÷ ticks per day × hour-of-day factor × region factor × station multiplier | `shared/fuelcore/forecast.py` |
+| Scheduled spikes | **Event-timeline reconstruction** | The station multiplier for any past or future tick is rebuilt from the list of demand-spike events, so a spike scheduled for later is already in the forecast | `forecast.py` (`MultiplierTimeline`) |
+| Calibration | **Ratio (level) adjustment over a sliding window, clamped** | ratio = sum of actual ÷ sum of baseline over the last 16 ticks, kept between 0.5 and 3.0 so one outlier can't swing it | `forecast.py` (`calibrate`), prediction service |
+| Confidence | **1 − MAPE** (mean absolute percentage error) | How far the calibrated forecast was from reality over the same 16 ticks | `forecast.py` |
+| Spike detection | **Threshold + run-length rule** | Flag when the multiplier is above 1, or actual demand ran over 1.3× the baseline for 4 ticks in a row | `forecast.py` |
+| Stockout projection | **Discrete-time inventory simulation** | Step tick by tick for 48 ticks: add arriving shipments (clipped at tank capacity, as the simulator does), subtract forecast demand; the first tick below zero is the time to stockout | `shared/fuelcore/projection.py` |
+| Risk score | **Piecewise-linear function of slack** | risk = (lead time + 6 h − time to stockout) ÷ 6 h, clamped to 0..1 | `projection.py` |
+| Depot outlook | **Cumulative sum of scheduled arrivals** | Stock + deliveries due within the horizon, and the next delivery tick for the reserve rule | `shared/fuelcore/analyze.py` |
+| Fallback forecast | **Graceful degradation, same code path** | If the prediction service misses its 1 s timeout, the backend calls the same `analyze()` with calibration switched off | `backend/app/forecaster.py` |
+
+### Deciding and acting
+
+| Part | Algorithm / technique | How it works here | Code |
+|---|---|---|---|
+| Choosing who gets fuel | **Greedy priority ordering** | Candidates sorted by risk, then by liters of unmet demand expected; each takes what it needs from what is left | `backend/app/engine.py` |
+| Sizing a shipment | **Minimum over capacity constraints** | quantity = min(refill to 85%, tank headroom, route max, depot stock after reserve, dispatch left), rounded down to 50 L; skipped under 500 L | `engine.py` |
+| Budgets within a tick | **Running resource accounting** | Depot stock, dispatch capacity and inbound fuel are reduced as each shipment is planned and submitted, so shipments in the same tick never over-commit | `engine.py`, `validation.py` (`Committed`) |
+| Route choice | **Shortest feasible alternative** | Routes to the station sorted by travel time; the first one that is open, not about to be cut, and can supply ≥ 500 L wins | `engine.py` |
+| Scarce fuel | **Proportional fair share** | A station may use max(stock − other stations' need, stock × its need ÷ total need); cross-region shipments leave the depot's own stations their full need | `engine.py` (`reserve`) |
+| Pre-validation | **Rule chain in the simulator's order** | Guard checks run in the exact order the simulator validates; the first failing rule is reported, plus two stricter safety rules | `backend/app/validation.py` |
+| What-if chart | **Re-projection with a hypothetical shipment** | The same inventory simulation, run again with the shipment added at its arrival tick | `engine.py` |
+| Explanations | **Template text from computed numbers** (optional LLM rewrite) | The reason is filled from the engine's own numbers. If enabled, Cerebras rewrites it in 2 sentences within 1.5 s, in the background; the template stays if it fails | `engine.py`, `backend/app/explain.py` |
+| Duplicate protection | **Deterministic idempotency keys** | `{tick}-{station}-{fuel}-{route}-{n}`, with n the first unused number; a resend after a timeout reuses the key, so the simulator de-duplicates it | `engine.py` (`make_key`) |
+| Recommendation lifecycle | **Finite state machine with expiry** | OPEN → SUBMITTING → SUBMITTED, or REJECTED / EXPIRED (4 ticks) / SUPERSEDED (re-checked every tick) / FAILED | `backend/app/recommendations.py` |
+| Auto and hybrid modes | **Policy gate** | Auto submits everything; hybrid only low-risk, high-confidence, non-fallback items; both hold while data is stale or the breaker is open | `recommendations.py` |
+
+### Storing, showing and measuring
+
+| Part | Algorithm / technique | How it works here | Code |
+|---|---|---|---|
+| Database writes | **Write-behind queue** (async producer/consumer) with retry | The API and engine only put writes in a queue; one worker applies them in order and retries with growing waits while Postgres is down | `backend/app/persistence.py` |
+| Upserts | **Idempotent `INSERT … ON CONFLICT UPDATE`** | Re-running a write never creates duplicates, so retries are safe | `persistence.py` |
+| API reads | **In-memory read model** | Every dashboard request is answered from memory, never from the simulator or the database (p95 37 ms under load) | `backend/app/views.py` |
+| Dashboard data | **Polling with stale-while-revalidate cache** (TanStack Query) | Refetch every 2 s; if a request fails, the last data stays on screen | `frontend/src/api/` |
+| Map | **Equirectangular projection with cos(latitude) correction + Douglas–Peucker simplification** | Official division boundaries (geoBoundaries) are projected to SVG and simplified in screen space; sites within a few km of each other are fanned out, with a leader line to their true location | `scripts/gen_bangladesh_map.py`, `frontend/src/components/network/NetworkMap.tsx` |
+| Metrics | **Counters, gauges and histograms** (Prometheus) | Rate, errors and duration of every simulator call; p95 latency via `histogram_quantile` in Grafana | `backend/app/metrics.py` |
+| Logs | **Structured JSON logging** | One line per event with `tick`, `component` and `event` fields | `backend/app/logs.py` |
+| Testing | **Unit tests, HTTP mocking, live fault injection, load testing** | pytest + respx for client behaviour; `verify_live.py` injects real faults into the real simulator; k6 for load | `*/tests/`, `scripts/`, `loadtest/` |
+
+---
+
+## 7. What happens when things break
 
 | Failure | How we notice | What the platform does |
 |---|---|---|
@@ -308,7 +372,7 @@ rejections). We read both.
 
 ---
 
-## 7. Things we discovered about the simulator
+## 8. Things we discovered about the simulator
 
 We probed the real simulator before writing the engine. These facts are not all in the guide, and they shape our
 rules:
@@ -324,7 +388,7 @@ rules:
 
 ---
 
-## 8. Demo script
+## 9. Demo script
 
 Everything is on the dashboard's **Demo** tab (preset buttons). The world is deterministic, so it plays the same every
 time.
@@ -344,7 +408,7 @@ time.
 
 ---
 
-## 9. Questions judges may ask
+## 10. Questions judges may ask
 
 **Why not machine learning?** The world is small (12 pairs) and follows a documented formula. A formula plus
 calibration is accurate (about 90% confidence), explainable in one sentence, and cannot surprise the operator. The
@@ -372,7 +436,7 @@ the scenario stops supplying fuel. Our advantage is largest in the first two to 
 
 ---
 
-## 10. Where the code lives
+## 11. Where the code lives
 
 ```text
 run.sh                      one command to run everything
@@ -397,17 +461,19 @@ backend/app/
   persistence.py            Postgres, write-behind with retry
   explain.py                optional LLM explanations (Cerebras), template text as fallback
   api.py, views.py          the dashboard API
-frontend/src/               React dashboard (screens/, components/, api/)
+frontend/src/               React dashboard (screens/, components/, api/; network map in components/network/NetworkMap.tsx)
 observability/              Prometheus config, Grafana dashboard
 scripts/e2e.py              end-to-end proof against the real simulator
 scripts/compare.py          do-nothing vs platform
+scripts/verify_live.py      27 live crisis / fault / fallback checks against the real simulator
+scripts/gen_bangladesh_map.py  builds the map paths from official division boundaries
 loadtest/k6.js              50 users for 1 minute on the busiest endpoints
 .github/workflows/ci.yml    lint, tests, build, full-stack smoke test on every push
 ```
 
 ---
 
-## 11. Tests and results
+## 12. Tests and results
 
 Everything below was run on this machine against the real stack (official simulator image, real containers).
 Nothing in this table is mocked.
@@ -461,14 +527,6 @@ straight failures, as designed.
 
 - `shared/`: 34 tests. Forecast math, hour factors, calibration, spike detection, projection, risk.
 - `backend/`: 26 tests. One per simulator 409 code, both error shapes, idempotency keys, engine rules (backup route,
-  no-route alert, dispatch limits), and retries, circuit breaker, stale header and SSE parsing. Also a regression test
-  for a bug the live run found (below).
+  no-route alert, dispatch limits), and retries, circuit breaker, stale header and SSE parsing. Also a test that a batch of
+  automatic shipments in one tick never exceeds a depot's dispatch capacity.
 - `prediction/`: 5 tests. The service's API and metrics.
-
-### A bug the live checks caught, and the fix
-
-The first live run showed 8 × `DISPATCH_CAPACITY_EXCEEDED` from the simulator. In auto mode, several recommendations
-were submitted in the same tick, and each was checked against the snapshot on its own, so together they exceeded a
-depot's per-tick dispatch limit. Now every batch carries a running total of what it has already sent in that tick
-(`RecommendationService.submit_auto`), and the second shipment is resized to the capacity left. After the fix: 0
-rejections across all runs.
