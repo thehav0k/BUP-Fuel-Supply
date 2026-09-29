@@ -7,9 +7,14 @@ The simulator is the world; this platform is the brain and the operator's screen
 ## Run
 
 ```bash
-cp .env.example .env          # SIMULATION_SPEED=1, simulator starts paused
-docker compose up -d --build
+./run.sh              # builds and starts everything, waits until healthy, prints URLs
+./run.sh demo         # same, then resets the simulator and starts the clock
+./run.sh e2e 200      # same, then runs the end-to-end check (auto mode, 200 ticks)
+./run.sh compare      # do-nothing vs platform on the same seed and events
+./run.sh logs | stop | down
 ```
+
+`run.sh` creates `.env` from `.env.example` on first run (SIMULATION_SPEED=1, simulator starts paused).
 
 | URL | What |
 |---|---|
