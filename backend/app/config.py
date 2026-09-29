@@ -38,8 +38,9 @@ class Settings:
     hybrid_min_confidence: float = 0.8
     hybrid_max_risk: float = 0.7
     llm_explanations: bool = False
-    anthropic_api_key: str = ""
-    llm_model: str = "claude-haiku-4-5"
+    llm_api_key: str = ""
+    llm_base_url: str = "https://api.cerebras.ai/v1"
+    llm_model: str = "qwen-3.8-27b"
     llm_timeout_s: float = 1.5
 
     @classmethod
@@ -60,8 +61,9 @@ class Settings:
             enable_sync=_bool("ENABLE_SYNC", d.enable_sync),
             hybrid_min_confidence=_float("HYBRID_MIN_CONFIDENCE", d.hybrid_min_confidence),
             hybrid_max_risk=_float("HYBRID_MAX_RISK", d.hybrid_max_risk),
-            llm_explanations=_bool("LLM_EXPLANATIONS", bool(os.getenv("ANTHROPIC_API_KEY"))),
-            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+            llm_explanations=_bool("LLM_EXPLANATIONS", bool(os.getenv("CEREBRAS_API_KEY"))),
+            llm_api_key=os.getenv("CEREBRAS_API_KEY", ""),
+            llm_base_url=os.getenv("LLM_BASE_URL", d.llm_base_url).rstrip("/"),
             llm_model=os.getenv("LLM_MODEL", d.llm_model),
             llm_timeout_s=_float("LLM_TIMEOUT_S", d.llm_timeout_s),
         )

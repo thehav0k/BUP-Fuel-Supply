@@ -1,0 +1,80 @@
+services:
+  simulator:
+    image: asifmahmoud414/bup-fuel-supply-simulator:1.0.0
+    platform: linux/amd64
+    environment:
+      SIMULATION_SPEED: ${SIMULATION_SPEED:-1}
+      TICK_MINUTES: ${TICK_MINUTES:-15}
+      SIMULATOR_START_MODE: ${SIMULATOR_START_MODE:-paused}
+    ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: fuel
+      POSTGRES_PASSWORD: fuel
+      POSTGRES_DB: fuel
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fuel -d fuel"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  prediction:
+    build: {context: ., dockerfile: prediction/Dockerfile}
+    ports: ["8002:8002"]
+
+  backend:
+    build: {context: ., dockerfile: backend/Dockerfile}
+    environment:
+      SIMULATOR_URL: http://simulator:8000
+      PREDICTION_URL: http://prediction:8002
+      DATABASE_URL: postgresql+asyncpg://fuel:fuel@postgres:5432/fuel
+      DEFAULT_MODE: ${DEFAULT_MODE:-manual}
+      GRAFANA_URL: http://localhost:3001/d/fuel-ops/fuel-supply-operations
+      LLM_EXPLANATIONS: ${LLM_EXPLANATIONS:-false}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+    ports: ["8001:8001"]
+    depends_on:
+      simulator: {condition: service_healthy}
+      postgres: {condition: service_healthy}
+      prediction: {condition: service_healthy}
+
+  frontend:
+    build: {context: ./frontend}
+    ports: ["3000:3000"]
+    depends_on:
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes: [./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro]
+    ports: ["9090:9090"]
+    depends_on: [backend, prediction]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3001:3000"]
+    depends_on: [prometheus]
+
+volumes:
+  pgdata:

@@ -5,7 +5,7 @@ WORKDIR /srv
 COPY shared /srv/shared
 COPY prediction/pyproject.toml /srv/prediction/pyproject.toml
 COPY prediction/app /srv/prediction/app
-RUN pip install /srv/shared /srv/prediction
+RUN pip install --timeout 120 --retries 10 /srv/shared /srv/prediction
 WORKDIR /srv/prediction
 USER nobody
 EXPOSE 8002

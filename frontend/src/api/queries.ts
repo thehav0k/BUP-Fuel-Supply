@@ -7,7 +7,7 @@ import {
   type QueryKey,
 } from '@tanstack/react-query'
 import { api } from './client'
-import type { CreateEventBody, CreateFaultBody, Mode, Settings, State } from './types'
+import type { Mode, Settings, State } from './types'
 
 export const POLL_MS = 2000
 
@@ -110,22 +110,12 @@ export function useCancelAllocation() {
   })
 }
 
-/** Demo-control calls change the whole world, so refresh everything afterwards. */
-export function useDemoMutation<TVars, TResult>(key: string, fn: (vars: TVars) => Promise<TResult>) {
+/** Demo-control calls change the whole world, so every query is refreshed afterwards. */
+export function useDemoAction() {
   const qc = useQueryClient()
   return useMutation({
-    mutationKey: ['demo', key],
-    mutationFn: fn,
+    mutationKey: ['demo'],
+    mutationFn: ({ fn }: { label: string; fn: () => Promise<unknown> }) => fn(),
     onSettled: () => qc.invalidateQueries(),
   })
-}
-
-export const demoFns = {
-  run: () => api.demo.run(),
-  pause: () => api.demo.pause(),
-  step: (count: number) => api.demo.step(count),
-  reset: () => api.demo.reset(),
-  createEvent: (body: CreateEventBody) => api.demo.createEvent(body),
-  createFault: (body: CreateFaultBody) => api.demo.createFault(body),
-  clearFaults: () => api.demo.clearFaults(),
 }

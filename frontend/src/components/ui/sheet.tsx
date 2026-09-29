@@ -15,16 +15,21 @@ interface SheetProps {
 /** Right-side drawer. Esc or backdrop click closes it. */
 export function Sheet({ open, onClose, title, description, children, className }: SheetProps) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  })
 
+  // Only on open/close: the parent re-renders every poll and must not steal focus.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onCloseRef.current()
     }
     window.addEventListener('keydown', onKey)
     panelRef.current?.focus()
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
   return (
