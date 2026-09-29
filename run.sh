@@ -5,6 +5,8 @@
 #   ./run.sh demo       same, then reset the simulator and start the clock (SIMULATION_SPEED from .env)
 #   ./run.sh e2e [N]    same, then run the end-to-end check for N ticks (default 200)
 #   ./run.sh compare    same, then run the do-nothing vs platform comparison
+#   ./run.sh verify     same, then inject every crisis, fault and fallback live and check the reaction
+#   ./run.sh loadtest   same, then k6: 50 virtual users for 1 minute on /api/state and /api/recommendations
 #   ./run.sh logs       follow backend logs
 #   ./run.sh stop       stop everything (keeps data)
 #   ./run.sh down       stop and remove everything including the database volume
@@ -58,8 +60,14 @@ case "$cmd" in
     ;;
   e2e) up; python3 scripts/e2e.py --ticks "${2:-200}" ;;
   compare) up; (cd scripts && python3 compare.py --ticks "${2:-192}") ;;
+  verify) up; python3 scripts/verify_live.py ;;
+  loadtest)
+    up
+    docker run --rm -i --network bup-fuel-supply_default -e BASE_URL=http://backend:8001 grafana/k6:0.54.0 \
+      run --summary-trend-stats "avg,med,p(95),p(99),max" - < loadtest/k6.js
+    ;;
   logs) compose logs -f backend ;;
   stop) compose stop ;;
   down) compose down -v ;;
-  *) sed -n '2,11p' "$0"; exit 1 ;;
+  *) sed -n '2,13p' "$0"; exit 1 ;;
 esac

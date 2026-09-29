@@ -15,9 +15,8 @@ from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
 
-from fuelcore import FUELS
-
 from app.state import Snapshot
+from fuelcore import FUELS
 
 VALID_DEPOT_STATUS = ("OPEN", "CONSTRAINED")
 EPS = 1e-6

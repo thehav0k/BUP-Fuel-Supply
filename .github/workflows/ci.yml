@@ -10,8 +10,8 @@ jobs:
         with: {python-version: "3.12"}
       - run: pip install -e 'shared[dev]' -e 'backend[dev]' -e 'prediction[dev]'
       - run: ruff check shared backend prediction scripts
-      - run: pytest -q shared
-      - run: pytest -q backend
+      - run: cd shared && pytest -q
+      - run: cd backend && pytest -q
       - run: cd prediction && pytest -q
 
   frontend:

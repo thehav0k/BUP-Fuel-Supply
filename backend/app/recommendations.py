@@ -17,8 +17,6 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from fuelcore import risk_level
-
 from app.config import Settings
 from app.engine import MIN_SHIPMENT, Plan, Proposal, floor_to, make_key
 from app.logs import event
@@ -27,7 +25,8 @@ from app.persistence import Persistence
 from app.sim.client import SimulatorClient
 from app.sim.errors import CircuitOpen, SimConflict, SimError, SimUnavailable
 from app.state import Snapshot, StateStore
-from app.validation import max_feasible, precheck
+from app.validation import Committed, max_feasible, precheck
+from fuelcore import risk_level
 
 log = logging.getLogger("app.recommendations")
 
@@ -293,12 +292,19 @@ class RecommendationService:
 
         self.paused_reason = auto_blocked if self.mode != "manual" else None
         if self.mode != "manual" and auto_blocked is None:
-            for rec in self.open_recs():
-                if rec.status == "OPEN" and (self.mode == "auto" or rec.auto_eligible):
-                    await self._submit(rec, snap, actor="auto")
+            await self.submit_auto(snap)
         self._trim()
         self.last_cycle_tick = tick
         return created
+
+    async def submit_auto(self, snap: Snapshot) -> None:
+        """Submit eligible open recs in priority order. Quantities sent earlier in this batch are not in the
+        snapshot yet, so they are carried in `committed` (otherwise several shipments from one depot in the same
+        tick could together exceed its dispatch capacity)."""
+        committed = Committed()
+        for rec in self.open_recs():
+            if rec.status == "OPEN" and (self.mode == "auto" or rec.auto_eligible):
+                await self._submit(rec, snap, actor="auto", committed=committed)
 
     def _from_proposal(self, p: Proposal, tick: int, key: str) -> Recommendation:
         eligible = (not p.fallback and p.confidence >= self.settings.hybrid_min_confidence
@@ -394,19 +400,20 @@ class RecommendationService:
                 return
 
     async def _submit(
-        self, rec: Recommendation, snap: Snapshot, actor: str
+        self, rec: Recommendation, snap: Snapshot, actor: str, committed: Committed | None = None
     ) -> tuple[bool, Recommendation, dict[str, str] | None]:
         """Re-check against the given (fresh) state, resize if the state moved, then POST."""
         tick = snap.tick
+        committed = committed or Committed()
         used = self.used_keys(snap) - {rec.idempotency_key}
-        rejection = precheck(rec.body(), snap, used_keys=used)
+        rejection = precheck(rec.body(), snap, committed, used_keys=used)
         if rejection is not None and rejection.code in RESIZABLE and not rec.key_sent:
-            feasible = floor_to(max_feasible(rec.body(), snap))
+            feasible = floor_to(max_feasible(rec.body(), snap, committed))
             if feasible >= MIN_SHIPMENT:
                 old = rec.quantity
                 rec.quantity = min(rec.quantity, feasible)
                 rec.caps = [*rec.caps, f"resized {old:,.0f} -> {rec.quantity:,.0f} L at approval ({rejection.code})"]
-                rejection = precheck(rec.body(), snap, used_keys=used)
+                rejection = precheck(rec.body(), snap, committed, used_keys=used)
         if rejection is not None:
             PREVENTED.labels(rejection.code).inc()
             rec.failure_code, rec.failure_message = rejection.code, rejection.message
@@ -418,6 +425,7 @@ class RecommendationService:
         rec.key_sent = True
         self._decide(rec, "approved" if actor == "operator" else "auto", actor, tick)
         RECOMMENDATIONS.labels("approved" if actor == "operator" else "auto").inc()
+        committed.add(rec.body())  # counts even if the POST outcome is unknown: it may have landed
         return await self._post(rec, tick, actor)
 
     async def _post(

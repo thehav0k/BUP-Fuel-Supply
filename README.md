@@ -3,9 +3,10 @@
 **In one sentence:** a system that watches a simulated fuel network, predicts which petrol stations will run dry,
 and ships fuel to them from depots in time, with a human able to approve every shipment.
 
-**The result:** in a 120-tick run against the official simulator, our platform kept the **service level at 100%**
-(every liter customers asked for was served), with **zero rejected shipments**. Doing nothing drops to **88% after 96
-ticks (1 day)** and **46% after 192 ticks (2 days)**.
+**The result, measured on this machine against the official simulator image:** with the same world and the same three
+crises (Dhaka demand spike, Gazipur → Mirpur road cut, Patiya supply cut), doing nothing ends at **42.7%** service level
+after 192 ticks (2 days) with 115,061 L unmet. **Our platform ends at 100%**, with 0 L unmet, 0 failed shipments and
+0 rejected shipments.
 
 ---
 
@@ -34,6 +35,8 @@ You need Docker Desktop and Python 3.
 ./run.sh demo         # same, then reset the simulator and start its clock
 ./run.sh e2e 200      # same, then prove it works: auto mode for 200 ticks, check the service level
 ./run.sh compare      # "do nothing" vs "our platform" on the same world and the same crises
+./run.sh verify       # inject every crisis, fault and fallback live and check the reaction (27 checks)
+./run.sh loadtest     # k6: 50 users for 1 minute
 ./run.sh logs         # watch the backend's decisions live
 ./run.sh stop         # stop (keeps data)      ./run.sh down   # stop and delete everything
 ```
@@ -406,21 +409,66 @@ loadtest/k6.js              50 users for 1 minute on the busiest endpoints
 
 ## 11. Tests and results
 
+Everything below was run on this machine against the real stack (official simulator image, real containers).
+Nothing in this table is mocked.
+
 ```bash
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e 'shared[dev]' -e 'backend[dev]' -e 'prediction[dev]'
-pytest -q shared && pytest -q backend && (cd prediction && pytest -q)
-./run.sh e2e 200
+./run.sh compare      # do nothing vs platform
+./run.sh e2e 200      # auto mode, 200 ticks
+./run.sh verify       # 27 live checks
+./run.sh loadtest     # k6
 ```
 
-| Run (seed 12345, no crises injected) | Tick | Service level |
-|---|---|---|
-| **Our platform, auto mode** (`scripts/e2e.py`) | 120 | **1.00**, 0 L unmet, 0 failed shipments, 0 × 409 |
-| Do nothing | 96 | 0.88 |
-| Do nothing | 192 | 0.46 |
-| Do nothing | 480 | 0.18 |
+### Do nothing vs our platform (`scripts/compare.py`, 192 ticks, same seed, same 3 crises)
 
-- Unit tests cover forecast math, hour factors, calibration, projection and risk; one test per 409 code; both error
-  shapes; idempotency keys; and retries, circuit breaker, stale header and SSE parsing (mocked simulator).
-- **Not yet run:** the unit tests on the demo laptop (the local Python install kept timing out), the k6 load test, and
-  `scripts/compare.py` with injected crises.
+| | Service level | Unmet liters | Failed shipments | 409s |
+|---|---|---|---|---|
+| Do nothing | 0.427 | 115,061 | none sent | none sent |
+| **Our platform, auto mode** | **1.000** | **0** | **0** | **0** |
+
+Without crises, doing nothing gives 0.88 at tick 96, 0.46 at tick 192 and 0.18 at tick 480. Our platform stays at
+1.000 for 200 ticks (`scripts/e2e.py`, 0 failures, 0 × 409).
+
+### Live crisis, fault and fallback checks (`scripts/verify_live.py`): 27 of 27 pass
+
+| Area | What we inject for real | What we check |
+|---|---|---|
+| Crisis | Dhaka demand spike ×1.8 | Mirpur and Tongi flagged; recommendations with reasons appear; approve creates a real shipment that departs |
+| Crisis | Gazipur → Mirpur road cut | Mirpur switches to the Patiya backup route, and nothing is proposed on the cut road |
+| Crisis | Gazipur → Tongi road cut | "No route to Tongi … single point of failure" alert |
+| Crisis | Supply shortfall ×0.5 at Gazipur | Future deliveries halved; the depot reserve adjusts |
+| Crisis | Station outage at Cox's Bazar | Shown as OUTAGE, alerted, no shipments proposed |
+| Crisis | All of the above | 0 shipments rejected by the simulator |
+| Fault | `unavailable` 15 s | Degraded banner, last good state kept, breaker opens, auto holds, recovers alone |
+| Fault | `latency` 2.5 s (over the 2 s timeout) | Treated as failure, degraded, recovers |
+| Fault | `error_rate` 25% (the default) | Data stays fresh (max age 3.1 s), never degraded |
+| Fault | `stale_data` | Stale banner, auto submissions paused, clears after |
+| Fault | `stream_disconnect` + simulator restart | Live stream down, polling keeps data fresh, stream reconnects after |
+| Fallback | `docker compose stop prediction` | Backend switches to the baseline formula, recommendations labelled "fallback", switches back |
+| Fallback | `docker compose stop postgres` | Health shows DB down, API (2 ms) and engine keep running, queued writes flushed on return |
+| Reset | `/admin/reset` | Detected; state and open recommendations cleared |
+
+At a harsher 50% error rate, data stays fresh most of the time (median 2.4 s), and the circuit breaker opens on 5
+straight failures, as designed.
+
+### Load test (`loadtest/k6.js`, 50 virtual users, 1 minute, `/api/state` + `/api/recommendations`)
+
+| Requests | Throughput | Failed | Median | p95 | p99 | Target |
+|---|---|---|---|---|---|---|
+| 167,072 | 2,784 req/s | 0.00% | 15.9 ms | **37.2 ms** | 45.3 ms | p95 < 300 ms ✓ |
+
+### Unit tests: 65 pass
+
+- `shared/`: 34 tests. Forecast math, hour factors, calibration, spike detection, projection, risk.
+- `backend/`: 26 tests. One per simulator 409 code, both error shapes, idempotency keys, engine rules (backup route,
+  no-route alert, dispatch limits), and retries, circuit breaker, stale header and SSE parsing. Also a regression test
+  for a bug the live run found (below).
+- `prediction/`: 5 tests. The service's API and metrics.
+
+### A bug the live checks caught, and the fix
+
+The first live run showed 8 × `DISPATCH_CAPACITY_EXCEEDED` from the simulator. In auto mode, several recommendations
+were submitted in the same tick, and each was checked against the snapshot on its own, so together they exceeded a
+depot's per-tick dispatch limit. Now every batch carries a running total of what it has already sent in that tick
+(`RecommendationService.submit_auto`), and the second shipment is resized to the capacity left. After the fix: 0
+rejections across all runs.

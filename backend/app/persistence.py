@@ -176,7 +176,7 @@ class Persistence:
                     await asyncio.sleep(backoff)
                     backoff = min(10.0, backoff * 2)
                     continue
-            name, op = await self.queue.get()
+            _name, op = await self.queue.get()
             while True:
                 try:
                     assert self.session is not None

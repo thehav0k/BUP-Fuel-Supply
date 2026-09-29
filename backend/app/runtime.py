@@ -179,6 +179,12 @@ class Runtime:
         results = await asyncio.gather(*(self.sim.get(paths[n]) for n in names), return_exceptions=True)
         fetched = dict(zip(names, results, strict=True))
         errors = {n: r for n, r in fetched.items() if isinstance(r, BaseException)}
+        if errors and self.sim.breaker.state == "closed":
+            # Transient errors (error_rate fault): one more pass for just the failed resources, so a single
+            # unlucky resource does not throw away a whole cycle.
+            retry = await asyncio.gather(*(self.sim.get(paths[n]) for n in errors), return_exceptions=True)
+            fetched.update(zip(errors, retry, strict=True))
+            errors = {n: r for n, r in fetched.items() if isinstance(r, BaseException)}
         if errors:
             self.state.sync_failures += 1
             name, err = next(iter(errors.items()))

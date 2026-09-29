@@ -6,10 +6,9 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from fuelcore import FUELS, arrival_tick, parse_sim_time, risk_level, time_at
-
 from app.runtime import Runtime
 from app.state import IN_FLIGHT
+from fuelcore import FUELS, arrival_tick, parse_sim_time, risk_level, time_at
 
 VERSION = "1.0.0"
 

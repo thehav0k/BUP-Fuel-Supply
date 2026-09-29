@@ -222,7 +222,7 @@ def test_analyze_flags_spike_and_depot_next_arrival():
 
 
 def test_low_inventory_is_high_risk():
-    st = dict(MIRPUR, inventory={"DIESEL": 100, "PETROL": 9000, "OCTANE": 5000})
+    st = dict(MIRPUR, inventory={"DIESEL": 40, "PETROL": 9000, "OCTANE": 5000})
     out = analyze(_request(stations=[st]))
     diesel = next(p for p in out["pairs"] if p["fuel"] == "DIESEL")
     assert diesel["ticks_to_stockout"] == 0

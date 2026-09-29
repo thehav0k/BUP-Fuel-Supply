@@ -149,15 +149,14 @@ async def put_settings(request: Request, body: SettingsBody) -> dict[str, Any]:
         r.recs.set_mode(body.mode)
         if body.mode != "manual":
             # Act on already-open recommendations right away instead of waiting for the next tick.
+            await r.refresh_full()
             snap = r.state.snapshot
             if snap is not None and r.plan is not None:
                 async with r.recs.lock:
                     blocked = r.auto_blocked()
                     r.recs.paused_reason = blocked
                     if blocked is None:
-                        for rec in r.recs.open_recs():
-                            if rec.status == "OPEN" and (body.mode == "auto" or rec.auto_eligible):
-                                await r.recs._submit(rec, snap, actor="auto")
+                        await r.recs.submit_auto(snap)
     return r.recs.settings_view()
 
 

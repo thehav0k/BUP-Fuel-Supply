@@ -18,11 +18,10 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from fuelcore import FUELS, inbound_by_tick, project, risk_level, risk_score
-
 from app.metrics import PREVENTED
 from app.state import Snapshot
 from app.validation import Committed, precheck
+from fuelcore import FUELS, inbound_by_tick, project, risk_level, risk_score
 
 TARGET_FILL = 0.85
 LOW_FILL = 0.35

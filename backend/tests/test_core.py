@@ -1,4 +1,5 @@
 import copy
+import json
 
 import httpx
 import pytest
@@ -262,3 +263,40 @@ async def test_sse_503_detail_shape_raises():
     async with httpx.AsyncClient(base_url=BASE) as http:
         with pytest.raises(SimUnavailable):
             await SSEListener(BASE, handler).consume(http)
+
+
+# ---------------------------------------------------------------- regression: batch auto-submit within one tick
+
+@respx.mock
+async def test_auto_batch_never_exceeds_depot_dispatch_capacity():
+    """Found live: two auto submissions from one depot in one tick got DISPATCH_CAPACITY_EXCEEDED (409)."""
+    from app.config import Settings
+    from app.persistence import Persistence
+    from app.recommendations import Recommendation, RecommendationService
+    from app.state import StateStore
+
+    posted = []
+
+    def create(request):
+        body = json.loads(request.content)
+        posted.append(body)
+        return httpx.Response(201, json={"id": len(posted), "status": "PENDING", **body})
+
+    respx.post(f"{BASE}/v1/allocations").mock(side_effect=create)
+    s = mutate(lambda s: s.station_by_id["station-tongi"]["inventory"].update(DIESEL=1000))
+    svc = RecommendationService(Settings(default_mode="auto"), client(), StateStore(), Persistence(""))
+
+    def rec(i, station, route, qty):
+        return Recommendation(
+            id=f"rec-{i}", created_tick=10, created_at="", expires_tick=14, status="OPEN", station_id=station,
+            station_name=station, fuel="DIESEL", quantity=qty, route_id=route, depot_id="depot-gazipur",
+            depot_name="Gazipur", transit_ticks=2, uses_backup_route=False, reason="", reason_source="template",
+            risk_before=0.9 - i / 10, risk_after=0.1, ticks_to_stockout_before=3, ticks_to_stockout_after=None,
+            confidence=0.9, fallback=False, caps=[], alternative=None, what_if=[], auto_eligible=True,
+            idempotency_key=f"10-k-{i}")
+
+    svc.recs = {"rec-1": rec(1, "station-mirpur", "route-gazipur-mirpur", 7000),
+                "rec-2": rec(2, "station-tongi", "route-gazipur-tongi", 6500)}
+    await svc.submit_auto(s)
+    assert sum(p["quantity"] for p in posted) <= 12000
+    assert [p["quantity"] for p in posted] == [7000, 5000]  # second one resized to the dispatch left
