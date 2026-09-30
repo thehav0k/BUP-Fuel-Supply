@@ -21,7 +21,9 @@ supply shortfall at Patiya depot.
 - **Load:** a p95 API latency of 37 ms at 50 concurrent users, against a 300 ms target.
 
 ---
+## Presentation
 
+[**View Presentation slides →**](https://docs.google.com/presentation/d/1TcYBJglt7C8vS_czDQWRaLFsj3SiFZIK/edit)
 ## Contents
 
 1. [Features](#1-features)
